@@ -8,9 +8,7 @@ import Announcement from "../models/announcement.model";
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
   await connectDB();
-  const announcementDoc = await Announcement.findOne()
-    .sort({ createdAt: -1 })
-    .lean();
+  const announcementDoc = await Announcement.findOne().lean();
 
   return {
     announcementText: announcementDoc ? announcementDoc.announcement : "",
@@ -35,42 +33,43 @@ export const action = async ({ request }) => {
     const newDoc = await Announcement.create({
       announcement: text.trim(),
     });
-    const response = await admin.graphql(
+
+    const shopResponse = await admin.graphql(
       `#graphql
-      mutation CreateMetafield($metafields: [MetafieldsSetInput!]!) {
-        metafieldsSet(metafields: $metafields) {
-          metafields {
-            id
-            value
-          }
-          userErrors {
-            field
-            message
-          }
+      query {
+        shop {
+          id
         }
-      }`,
-      {
-        variables: {
-          metafields: [
-            {
-              namespace: "my_app",
-              key: "announcement",
-              type: "single_line_text_field",
-              value: text.trim(),
-            },
-          ],
-        },
-      }
+      }`
     );
+    const shopData = await shopResponse.json();
+    const shopId = shopData.data?.shop?.id;
 
-    const responseJson = await response.json();
-    const userErrors = responseJson.data?.metafieldsSet?.userErrors;
-
-    if (userErrors && userErrors.length > 0) {
-      return {
-        success: false,
-        message: `Saved to DB, but failed to sync to Shopify: ${userErrors[0].message}`,
-      };
+    if (shopId) {
+      await admin.graphql(
+        `#graphql
+        mutation CreateMetafield($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            metafields {
+              id
+              value
+            }
+          }
+        }`,
+        {
+          variables: {
+            metafields: [
+              {
+                ownerId: shopId,
+                namespace: "my_app",
+                key: "announcement",
+                type: "single_line_text_field",
+                value: text.trim(),
+              },
+            ],
+          },
+        }
+      );
     }
 
     return {
@@ -106,6 +105,8 @@ export default function Index() {
   }, [fetcher.data]);
 
   const isLoading = fetcher.state === "loading" || fetcher.state === "submitting";
+  const showSuccessBanner = fetcher.state === "idle" && fetcher.data?.success === true;
+  const showErrorBanner = fetcher.state === "idle" && fetcher.data?.success === false;
 
   return (
     <s-page heading="Announcement Dashboard">
@@ -128,7 +129,7 @@ export default function Index() {
           <s-button
             variant="primary"
             loading={isLoading}
-            disabled={!announcementText.trim()}
+            disabled={!announcementText.trim() || isLoading}
             onClick={() =>
               fetcher.submit(
                 { announcement: announcementText },
@@ -140,10 +141,18 @@ export default function Index() {
           </s-button>
         </div>
 
-        {fetcher.data?.success && (
+        {showSuccessBanner && (
           <div style={{ marginTop: "20px" }}>
             <s-banner tone="success">
-              {fetcher.data.message}
+              {fetcher.data.message || "Announcement updated successfully."}
+            </s-banner>
+          </div>
+        )}
+
+        {showErrorBanner && (
+          <div style={{ marginTop: "20px" }}>
+            <s-banner tone="critical">
+              {fetcher.data.message || "An error occurred."}
             </s-banner>
           </div>
         )}
