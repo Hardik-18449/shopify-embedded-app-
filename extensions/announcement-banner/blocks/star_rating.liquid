@@ -1,0 +1,51 @@
+{% comment %}
+  Read the text from the Shop Metafield using the namespace and key configured in the backend
+{% endcomment %}
+{% assign announcement_text = shop.metafields.my_app.announcement.value %}
+
+{%- if announcement_text != blank -%}
+  <div class="fa-announcement-banner">
+    <div class="fa-announcement-content">
+      <span>{{ announcement_text }}</span>
+    </div>
+  </div>
+
+  <style>
+    .fa-announcement-banner {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 999999;
+      background-color: #000000;
+      color: #ffffff;
+      padding: 12px 24px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      max-width: 350px;
+      animation: fa-fade-in 0.3s ease-in-out;
+    }
+
+    .fa-announcement-content {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+
+    @keyframes fa-fade-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Floating Announcement",
+  "target": "body",
+  "settings": []
+}
+{% endschema %}

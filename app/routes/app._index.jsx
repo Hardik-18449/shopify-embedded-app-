@@ -1,43 +1,126 @@
-import { useState } from "react";
-import { useFetcher } from "react-router";
+import { useState, useEffect } from "react";
+import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
+import { connectDB } from "../config/mongodb.server";
+import Announcement from "../models/announcement.model";
+
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
-
-  return null;
-};
-export const action = async ({ request }) => {
-  const formData = await request.formData();
-
-  const announcement = formData.get("announcement");
+  await connectDB();
+  const announcementDoc = await Announcement.findOne()
+    .sort({ createdAt: -1 })
+    .lean();
 
   return {
-    success: true,
-    announcement,
+    announcementText: announcementDoc ? announcementDoc.announcement : "",
   };
 };
 
-export default function Index() {
-  const fetcher = useFetcher();
-  const [announcement, setAnnouncement] = useState("");
+export const action = async ({ request }) => {
+  const { admin } = await authenticate.admin(request);
+  await connectDB();
 
-  const isLoading =
-    fetcher.state === "loading" || fetcher.state === "submitting";
+  const formData = await request.formData();
+  const text = formData.get("announcement");
+
+  if (!text || !text.trim()) {
+    return {
+      success: false,
+      message: "Announcement is required.",
+    };
+  }
+
+  try {
+    const newDoc = await Announcement.create({
+      announcement: text.trim(),
+    });
+    const response = await admin.graphql(
+      `#graphql
+      mutation CreateMetafield($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields {
+            id
+            value
+          }
+          userErrors {
+            field
+            message
+          }
+        }
+      }`,
+      {
+        variables: {
+          metafields: [
+            {
+              namespace: "my_app",
+              key: "announcement",
+              type: "single_line_text_field",
+              value: text.trim(),
+            },
+          ],
+        },
+      }
+    );
+
+    const responseJson = await response.json();
+    const userErrors = responseJson.data?.metafieldsSet?.userErrors;
+
+    if (userErrors && userErrors.length > 0) {
+      return {
+        success: false,
+        message: `Saved to DB, but failed to sync to Shopify: ${userErrors[0].message}`,
+      };
+    }
+
+    return {
+      success: true,
+      message: "Announcement updated successfully.",
+      announcementText: newDoc.announcement,
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      message: "An error occurred while saving.",
+    };
+  }
+};
+
+export default function Index() {
+  const { announcementText: initialText } = useLoaderData();
+  const fetcher = useFetcher();
+
+  const [announcementText, setAnnouncement] = useState(initialText || "");
+
+  useEffect(() => {
+    if (initialText !== undefined) {
+      setAnnouncement(initialText);
+    }
+  }, [initialText]);
+
+  useEffect(() => {
+    if (fetcher.data?.success && fetcher.data?.announcementText !== undefined) {
+      setAnnouncement(fetcher.data.announcementText);
+    }
+  }, [fetcher.data]);
+
+  const isLoading = fetcher.state === "loading" || fetcher.state === "submitting";
 
   return (
     <s-page heading="Announcement Dashboard">
       <s-section heading="Create Announcement">
         <s-text-field
-          label="Announcement"
+          label="Announcement Text"
           placeholder="Type announcement here..."
-          value={announcement}
+          value={announcementText}
+          maxlength="500"
           onInput={(e) => setAnnouncement(e.target.value)}
         />
 
         <div style={{ marginTop: "12px" }}>
           <s-text>
-            Characters: {announcement.length}/500
+            Characters: {announcementText.length}/500
           </s-text>
         </div>
 
@@ -45,10 +128,10 @@ export default function Index() {
           <s-button
             variant="primary"
             loading={isLoading}
-            disabled={!announcement.trim()}
+            disabled={!announcementText.trim()}
             onClick={() =>
               fetcher.submit(
-                { announcement },
+                { announcement: announcementText },
                 { method: "POST" }
               )
             }
@@ -60,7 +143,7 @@ export default function Index() {
         {fetcher.data?.success && (
           <div style={{ marginTop: "20px" }}>
             <s-banner tone="success">
-              Announcement saved successfully!
+              {fetcher.data.message}
             </s-banner>
           </div>
         )}
